@@ -108,7 +108,7 @@ int main(int argc, char** argv)
             m_ENU.getENU(iter->second.lla[0], iter->second.lla[1], iter->second.lla[2], a, b, c);
             Eigen::Vector3d gnss_xyz(a, b, c);
             iter->second.xyz = gnss_xyz;
-           eskf.updateGPS(iter->second);
+            eskf.updateGPS(iter->second);
             eskf.updateRPY(iter->second);
             GNSSF9KX.push_back(a);
             GNSSF9KY.push_back(b);
