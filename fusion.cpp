@@ -129,7 +129,7 @@ int main(int argc, char** argv)
         }
         else if (iter->second.id == 3)
         {
-            eskf.updateVehicle(iter->second);
+            //eskf.updateVehicle(iter->second);
         }
         count++;
 

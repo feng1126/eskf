@@ -38,7 +38,7 @@ bool eskf::InitPose(State state, Data data)
 
 bool eskf::updateGPS(const Data gnss)
 {
-    double dp_noise =  1e-12;
+    double dp_noise =  1e-11;
     double geo_x, geo_y, geo_z;
     Eigen::MatrixXd Y = Eigen::Matrix<double, 3, 1>::Zero();
     Y.block<3, 1>(0, 0) = state_.p - gnss.xyz;
@@ -84,7 +84,65 @@ bool eskf::updateGPS(const Data gnss)
     state_.time = gnss.timeStamp;
     LastP = state_.p;
     return true;
+}
 
+
+
+bool eskf::updatelane(const Data gnss)
+{
+
+    Eigen::Vector3d deta = gnss.xyz - LastP;
+
+    ////double dist = deta.squaredNorm();
+    ////if (dist > 2.0) return false;
+
+    //std::cout << "deta : " << deta.transpose() << std::endl;
+
+    double dp_noise = 1e-12;
+    double geo_x, geo_y, geo_z;
+    Eigen::MatrixXd Y = Eigen::Matrix<double, 3, 1>::Zero();
+    Y.block<3, 1>(0, 0) = state_.p - gnss.xyz;
+    //Y.block<3, 1>(3, 0) =  state_.v - current_gnss.v;
+    Eigen::MatrixXd Gt = Eigen::Matrix<double, 3, 15>::Zero();
+    Gt.block<3, 3>(0, 0) = Eigen::Matrix<double, 3, 3>::Identity();
+    //Gt.block<3, 3>(3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+    Eigen::Matrix<double, 3, 3> Ct = Eigen::Matrix<double, 3, 3>::Identity();
+
+    Eigen::MatrixXd R = Eigen::Matrix<double, 3, 3>::Identity();
+    R.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * dp_noise;
+    //R.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * dp_noise * dp_noise;
+    Eigen::MatrixXd K = error_state.p * Gt.transpose() * (Gt * error_state.p * Gt.transpose() + Ct * R * Ct.transpose()).inverse();
+    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(15, 15);
+    error_state.p = (I - K * Gt) * error_state.p * (I - K * Gt).transpose() + K * R * K.transpose();
+    error_state.x = error_state.x + K * (Y - Gt * error_state.x);
+    state_.p = state_.p - error_state.x.block<3, 1>(0, 0);
+    state_.v = state_.v - error_state.x.block<3, 1>(3, 0);
+    Eigen::Vector3d dphi_dir = error_state.x.block<3, 1>(6, 0);
+    double dphi_norm = dphi_dir.norm();
+    if (dphi_norm != 0)
+    {
+        dphi_dir = dphi_dir / dphi_norm;
+        dphi_dir = dphi_dir * std::sin(dphi_norm / 2);
+    }
+    Eigen::Quaterniond temp2(std::cos(dphi_norm / 2), dphi_dir[0], dphi_dir[1], dphi_dir[2]);
+    state_.q = temp2 * state_.q;
+    state_.q.normalize();
+
+    if (IsCovStable(9))
+    {
+        state_.bg = state_.bg + error_state.x.block<3, 1>(9, 0);
+    }
+
+    if (IsCovStable(12))
+    {
+        state_.ba = state_.ba + error_state.x.block<3, 1>(12, 0);
+    }
+
+    error_state.x.setZero();
+    lastData.ypr = gnss.ypr;
+    state_.time = gnss.timeStamp;
+    LastP = state_.p;
+    return true;
 }
 
 bool eskf::updateVehicle(const Data vehicle)
@@ -156,66 +214,6 @@ bool eskf::updateVehicle(const Data vehicle)
 
     return true;
 } 
-
-
-bool eskf::updatelane(const Data gnss)
-{
- 
-    Eigen::Vector3d deta = gnss.xyz - LastP;
-
-    ////double dist = deta.squaredNorm();
-    ////if (dist > 2.0) return false;
-
-    //std::cout << "deta : " << deta.transpose() << std::endl;
-
-    double dp_noise = 1e-11;
-    double geo_x, geo_y, geo_z;
-    Eigen::MatrixXd Y = Eigen::Matrix<double, 3, 1>::Zero();
-    Y.block<3, 1>(0, 0) = state_.p - gnss.xyz;
-    //Y.block<3, 1>(3, 0) =  state_.v - current_gnss.v;
-    Eigen::MatrixXd Gt = Eigen::Matrix<double, 3, 15>::Zero();
-    Gt.block<3, 3>(0, 0) = Eigen::Matrix<double, 3, 3>::Identity();
-    //Gt.block<3, 3>(3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
-    Eigen::Matrix<double, 3, 3> Ct = Eigen::Matrix<double, 3, 3>::Identity();
-
-    Eigen::MatrixXd R = Eigen::Matrix<double, 3, 3>::Identity();
-    R.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * dp_noise;
-    //R.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * dp_noise * dp_noise;
-    Eigen::MatrixXd K = error_state.p * Gt.transpose() * (Gt * error_state.p * Gt.transpose() + Ct * R * Ct.transpose()).inverse();
-    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(15, 15);
-    error_state.p = (I - K * Gt) * error_state.p*(I - K * Gt).transpose() + K * R * K.transpose();
-    error_state.x = error_state.x + K * (Y - Gt * error_state.x);
-    state_.p = state_.p - error_state.x.block<3, 1>(0, 0);
-    state_.v = state_.v - error_state.x.block<3, 1>(3, 0);
-    Eigen::Vector3d dphi_dir = error_state.x.block<3, 1>(6, 0);
-    double dphi_norm = dphi_dir.norm();
-    if (dphi_norm != 0)
-    {
-        dphi_dir = dphi_dir / dphi_norm;
-        dphi_dir = dphi_dir * std::sin(dphi_norm / 2);
-    }
-    Eigen::Quaterniond temp2(std::cos(dphi_norm / 2), dphi_dir[0], dphi_dir[1], dphi_dir[2]);
-    state_.q = temp2 * state_.q;
-    state_.q.normalize();
-
-    //if (IsCovStable(9))
-    {
-        state_.bg = state_.bg + error_state.x.block<3, 1>(9, 0);
-    }
-
-    //if (IsCovStable(12))
-    {
-        state_.ba = state_.ba + error_state.x.block<3, 1>(12, 0);
-    }
-
-    error_state.x.setZero();
-    lastData.ypr = gnss.ypr;
-    state_.time = gnss.timeStamp;
-    LastP = state_.p;
-    return true;
-
-}
-
 
 bool eskf::ComputeG_R_IFromImuData(Eigen::Matrix3d& G_R_I, std::vector<IMUData> imu_buffer_)
 {
@@ -294,7 +292,7 @@ void eskf::predictNewState(const double& dt,const  Eigen::Vector3d& gyro, const 
     Eigen::Vector3d w_hat = 0.5 * (gyro + lastData.gyro) - state_.bg;
     Eigen::Vector3d a_hat = 0.5 * (acc + lastData.acc) - state_.ba;
 
-    if (w_hat.norm() > 1e-5)
+    if (w_hat.norm() > 1e-12)
     {
         state_.q = qq * R_nm_nm * deltaQ(w_hat * dt);
     }
@@ -433,7 +431,7 @@ void eskf::updateRPY(const Data& RPY)
 {
 
     state_.time = RPY.timeStamp;
-    double dp_noise = 3e-13;
+    double dp_noise = 1e-13;
     Eigen::VectorXd Y = Eigen::Matrix<double, 3, 1>::Zero();
 
 

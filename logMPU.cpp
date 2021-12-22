@@ -113,7 +113,7 @@ void logSplitMPU::parseLog()
 				lon = stod(logData[6]);
 				alt = stod(logData[7]);
 				heading = stod(logData[8]);
-				heading = heading +0.5 * EIGEN_PI;
+				heading = heading + 0.5 * EIGEN_PI;
 				if (heading > 2 * EIGEN_PI)
 				{
 					heading = heading - 2.0 * EIGEN_PI;
