@@ -95,7 +95,7 @@ void logSplitMPU::parseLog()
 				}
 				Data data;
 				data.id = 0;
-				data.timeStamp = stod(logData[0]);;
+				data.timeStamp = stod(logData[0]);
 				data.timeGPS = stod(logData[1]);
 				data.lla = Eigen::Vector3d(lat, lon, 0);
 				data.ypr = Eigen::Vector3d(heading, 0, 0);
@@ -118,6 +118,8 @@ void logSplitMPU::parseLog()
 				{
 					heading = heading - 2.0 * EIGEN_PI;
 				}
+
+				//heading =   2.0 * EIGEN_PI - heading;
 				Data data;
 				data.id = 0;
 				data.timeStamp = stod(logData[0]);
@@ -218,9 +220,6 @@ void logSplitMPU::parseLog()
 			data.v = Eigen::Vector3d(Vehicle, 0, 0);
 			VehicleData.push_back(data);
 		}
-
-
-
 	}
 	in_fp.close();
 }

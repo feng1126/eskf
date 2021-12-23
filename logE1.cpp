@@ -117,7 +117,6 @@ void logSplitE1::parseLog()
 				data.ypr = Eigen::Vector3d(heading, 0, 0);
  				GNSSE1.push_back(data);			
 			}
-
 		}
 	}
 

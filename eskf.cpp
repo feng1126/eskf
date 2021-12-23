@@ -11,7 +11,6 @@ eskf::eskf()
     error_state.p.block<3, 3>(6, 6) = Eigen::Matrix3d::Identity() * 1e-4;
     error_state.p.block<3, 3>(9, 9) = Eigen::Matrix3d::Identity() * 1e-4;
     error_state.p.block<3, 3>(12, 12) = Eigen::Matrix3d::Identity() * 1e-4;
-
     has_imu = false;
 }
 
@@ -33,6 +32,58 @@ bool eskf::InitPose(State state, Data data)
 
     lastData = data;
     return true;
+}
+
+void eskf::updateXYZ(const Data XYZ, const double cov)
+{
+
+    double dp_noise = cov;
+    double geo_x, geo_y, geo_z;
+    Eigen::MatrixXd Y = Eigen::Matrix<double, 3, 1>::Zero();
+    Y.block<3, 1>(0, 0) = state_.p - XYZ.xyz;
+    //Y.block<3, 1>(3, 0) =  state_.v - current_gnss.v;
+    Eigen::MatrixXd Gt = Eigen::Matrix<double, 3, 15>::Zero();
+    Gt.block<3, 3>(0, 0) = Eigen::Matrix<double, 3, 3>::Identity();
+    //Gt.block<3, 3>(3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
+    Eigen::Matrix<double, 3, 3> Ct = Eigen::Matrix<double, 3, 3>::Identity();
+
+    Eigen::MatrixXd R = Eigen::Matrix<double, 3, 3>::Identity();
+    R.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * dp_noise;
+    //R.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * dp_noise * dp_noise;
+    Eigen::MatrixXd K = error_state.p * Gt.transpose() * (Gt * error_state.p * Gt.transpose() + Ct * R * Ct.transpose()).inverse();
+    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(15, 15);
+    error_state.p = (I - K * Gt) * error_state.p;// *(I - K * Gt).transpose() + K * R * K.transpose();
+    error_state.x = error_state.x + K * (Y - Gt * error_state.x);
+    state_.p = state_.p - error_state.x.block<3, 1>(0, 0);
+    state_.v = state_.v - error_state.x.block<3, 1>(3, 0);
+    Eigen::Vector3d dphi_dir = error_state.x.block<3, 1>(6, 0);
+    double dphi_norm = dphi_dir.norm();
+    if (dphi_norm != 0)
+    {
+        dphi_dir = dphi_dir / dphi_norm;
+        dphi_dir = dphi_dir * std::sin(dphi_norm / 2);
+    }
+    Eigen::Quaterniond temp2(std::cos(dphi_norm / 2), dphi_dir[0], dphi_dir[1], dphi_dir[2]);
+    state_.q = temp2 * state_.q;
+    state_.q.normalize();
+
+    if (IsCovStable(9))
+    {
+        state_.bg = state_.bg + error_state.x.block<3, 1>(9, 0);
+    }
+
+    if (IsCovStable(12))
+    {
+        state_.ba = state_.ba + error_state.x.block<3, 1>(12, 0);
+    }
+
+    error_state.x.setZero();
+    lastData.lla = XYZ.lla;
+    lastData.ypr = XYZ.ypr;
+    lastData.xyz = XYZ.xyz;
+    state_.time = XYZ.timeStamp;
+    LastP = state_.p;
+
 }
 
 
@@ -81,6 +132,7 @@ bool eskf::updateGPS(const Data gnss)
     error_state.x.setZero();
     lastData.lla  = gnss.lla;
     lastData.ypr = gnss.ypr;
+    lastData.xyz = gnss.xyz;
     state_.time = gnss.timeStamp;
     LastP = state_.p;
     return true;
@@ -88,17 +140,19 @@ bool eskf::updateGPS(const Data gnss)
 
 
 
-bool eskf::updatelane(const Data gnss)
+bool eskf::updatelane(const Data gnss, const double cov)
 {
 
-    Eigen::Vector3d deta = gnss.xyz - LastP;
+    Eigen::Vector3d deta = gnss.xyz - lastData.xyz;
+    double dist = deta.squaredNorm();
+    if (dist >2.5) return false;
 
-    ////double dist = deta.squaredNorm();
-    ////if (dist > 2.0) return false;
+    //std::cout << "lane : " << gnss.xyz << std::endl;
+    //std::cout << "lastData : " << lastData.xyz << std::endl;
 
-    //std::cout << "deta : " << deta.transpose() << std::endl;
+    //std::cout << "dist : " << dist << std::endl;
 
-    double dp_noise = 1e-12;
+    double dp_noise = cov;
     double geo_x, geo_y, geo_z;
     Eigen::MatrixXd Y = Eigen::Matrix<double, 3, 1>::Zero();
     Y.block<3, 1>(0, 0) = state_.p - gnss.xyz;
@@ -113,7 +167,7 @@ bool eskf::updatelane(const Data gnss)
     //R.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * dp_noise * dp_noise;
     Eigen::MatrixXd K = error_state.p * Gt.transpose() * (Gt * error_state.p * Gt.transpose() + Ct * R * Ct.transpose()).inverse();
     Eigen::MatrixXd I = Eigen::MatrixXd::Identity(15, 15);
-    error_state.p = (I - K * Gt) * error_state.p * (I - K * Gt).transpose() + K * R * K.transpose();
+    error_state.p = (I - K * Gt) * error_state.p * (I - K * Gt).transpose();// +K * R * K.transpose();
     error_state.x = error_state.x + K * (Y - Gt * error_state.x);
     state_.p = state_.p - error_state.x.block<3, 1>(0, 0);
     state_.v = state_.v - error_state.x.block<3, 1>(3, 0);
@@ -145,7 +199,7 @@ bool eskf::updatelane(const Data gnss)
     return true;
 }
 
-bool eskf::updateVehicle(const Data vehicle)
+bool eskf::updateVehicle(const Data vehicle, const double cov)
 {
     Eigen::Vector3d vehicleEnu = vehicle.v;
 
@@ -160,7 +214,7 @@ bool eskf::updateVehicle(const Data vehicle)
     //double heading = lastData.ypr[0];
     //double vel = vehicle.v[0];
     //vehicleEnu = Eigen::Vector3d(vel * cos(heading), vel * sin(heading), 0);
-    double dp_noise = 5e-9;
+    double dp_noise = cov;
     double geo_x, geo_y, geo_z;
     Eigen::MatrixXd Y = Eigen::Matrix<double, 3, 1>::Zero();
     Y.block<3, 1>(0, 0) = state_.v - vehicleEnu;
@@ -292,7 +346,7 @@ void eskf::predictNewState(const double& dt,const  Eigen::Vector3d& gyro, const 
     Eigen::Vector3d w_hat = 0.5 * (gyro + lastData.gyro) - state_.bg;
     Eigen::Vector3d a_hat = 0.5 * (acc + lastData.acc) - state_.ba;
 
-    if (w_hat.norm() > 1e-12)
+    if (w_hat.norm() > 1e-5)
     {
         state_.q = qq * R_nm_nm * deltaQ(w_hat * dt);
     }
@@ -370,8 +424,6 @@ void eskf::predictNewRkState(const double& dt, const  Eigen::Vector3d& gyro, con
     //state_.q = R_nm_nm *  quat_2_Rot(new_q);
 }
 
-
-
 bool eskf::Predict(Data imuData)
 {
     if (!has_imu)
@@ -423,23 +475,25 @@ bool eskf::Predict(Data imuData)
     state_.time = imuData.timeStamp;
     lastData.acc = imuData.acc;
     lastData.gyro = imuData.gyro;
+
+
+    std::cout << "imu 0 " << (imuData.acc).transpose() << std::endl;
+    std::cout << "imu 1 " << (imuData.acc - state_.ba).transpose() << std::endl;
     return true;
 }
 
 
-void eskf::updateRPY(const Data& RPY)
+void eskf::updateRPY(const Data& RPY,const double cov)
 {
 
     state_.time = RPY.timeStamp;
-    double dp_noise = 1e-13;
+    double dp_noise = cov;
     Eigen::VectorXd Y = Eigen::Matrix<double, 3, 1>::Zero();
 
-
     Eigen::Quaterniond  q_bNominal_bMeas;
-    q_bNominal_bMeas = YPR2Quaterniond(RPY.ypr) * state_.q.toRotationMatrix().transpose();
+    q_bNominal_bMeas = state_.q.toRotationMatrix().transpose() * YPR2Quaterniond(RPY.ypr) ;
 
     Y = ToEulerAngles(q_bNominal_bMeas);
-
     Eigen::MatrixXd Gt = Eigen::Matrix<double, 3, 15>::Zero();
     Gt.block(0, 6, 3, 3) = Eigen::Matrix<double, 3, 3>::Identity();
 
@@ -449,18 +503,17 @@ void eskf::updateRPY(const Data& RPY)
     Eigen::MatrixXd Ct = Eigen::Matrix<double, 3, 3>::Identity();
     Eigen::MatrixXd K = error_state.p * Gt.transpose() * (Gt * error_state.p * Gt.transpose() + Ct * R * Ct.transpose()).inverse();
 
-
     Eigen::MatrixXd I = Eigen::MatrixXd::Identity(15, 15);
-    error_state.p = (I - K * Gt) * error_state.p *(I - K * Gt).transpose() + K * R * K.transpose();
+    error_state.p = (I - K * Gt) * error_state.p * (I - K * Gt).transpose();// +K * R * K.transpose();
     error_state.x = error_state.x + K * (Y - Gt * error_state.x);
 
-    state_.p = state_.p - error_state.x.block<3, 1>(0, 0);
+    state_.p = state_.p  -  error_state.x.block<3, 1>(0, 0);
     state_.v = state_.v - error_state.x.block<3, 1>(3, 0);
 
     Eigen::Vector3d dphi_dir = error_state.x.block<3, 1>(6, 0);
 
     Eigen::Matrix3d temp = YPR2Quaterniond(dphi_dir[0], dphi_dir[1], dphi_dir[2]).toRotationMatrix();
-    state_.q = temp * state_.q;
+    state_.q = state_.q.toRotationMatrix() * temp  ;
     state_.q.normalize();
 
 
@@ -474,8 +527,6 @@ void eskf::updateRPY(const Data& RPY)
         state_.ba = state_.ba + error_state.x.block<3, 1>(12, 0);
     }
     error_state.x.setZero();
-
-
 }
 
 void eskf::updateq(const Data& q)
@@ -484,9 +535,8 @@ void eskf::updateq(const Data& q)
     double dp_noise = 1e-12;
     Eigen::VectorXd Y = Eigen::Matrix<double, 3, 1>::Zero();
 
-
     Eigen::Quaterniond  q_bNominal_bMeas;   
-    q_bNominal_bMeas = YPR2Quaterniond(q.ypr) * state_.q.toRotationMatrix().transpose();
+    q_bNominal_bMeas = YPR2Quaterniond(q.ypr) * state_.q.toRotationMatrix().inverse();
 
     Y = ToEulerAngles(q_bNominal_bMeas);
 
@@ -499,9 +549,8 @@ void eskf::updateq(const Data& q)
     Eigen::MatrixXd Ct = Eigen::Matrix<double, 3, 3>::Identity();
     Eigen::MatrixXd K = error_state.p * Gt.transpose() * (Gt * error_state.p * Gt.transpose() + Ct * R * Ct.transpose()).inverse();
 
-
     Eigen::MatrixXd I = Eigen::MatrixXd::Identity(15, 15);
-    error_state.p = (I - K * Gt) * error_state.p * (I - K * Gt).transpose() + K * R * K.transpose();// (I - KH)P(I - KH)' + KRK'
+    error_state.p = (I - K * Gt) * error_state.p * (I - K * Gt).transpose();// + K * R * K.transpose();// (I - KH)P(I - KH)' + KRK'
     error_state.x = error_state.x + K * (Y - Gt * error_state.x);
 
     state_.p = state_.p - error_state.x.block<3, 1>(0, 0);
@@ -536,7 +585,6 @@ bool eskf::IsCovStable(int INDEX_OFSET)
             return false;
         }
     }
-
     return true;
 }
 

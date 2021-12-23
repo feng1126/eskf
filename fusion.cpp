@@ -22,7 +22,7 @@ int main(int argc, char** argv)
 {
     logSplitMPU mSplitMPU;
     //std::string fileStrMPU = "C:\\Users\\niew\\Desktop\\data\\12\\2021-12-1-15-48-22.txt";
-    std::string fileStrMPU = "C:\\Users\\niew\\Desktop\\data\\12\\2021-12-3-17-6-11.txt";
+    std::string fileStrMPU = "C:\\Users\\niew\\Desktop\\data\\9.1\\feng.log";
     std::string fileStrE1 = "C:\\Users\\niew\\Desktop\\data\\12\\ReceivedTofile-COM9-2021_12_3_17-06-02.DAT";
 
     mSplitMPU.setFileName(fileStrMPU);
@@ -108,8 +108,9 @@ int main(int argc, char** argv)
             m_ENU.getENU(iter->second.lla[0], iter->second.lla[1], iter->second.lla[2], a, b, c);
             Eigen::Vector3d gnss_xyz(a, b, c);
             iter->second.xyz = gnss_xyz;
-            eskf.updateGPS(iter->second);
-            eskf.updateRPY(iter->second);
+            //eskf.updateGPS(iter->second);
+            eskf.updateXYZ(iter->second, 1e-12);
+            eskf.updateRPY(iter->second,1e-13);
             GNSSF9KX.push_back(a);
             GNSSF9KY.push_back(b);
 
@@ -124,12 +125,12 @@ int main(int argc, char** argv)
             m_ENU.getENU(iter->second.lla[0], iter->second.lla[1], iter->second.lla[2], a, b, c);
             Eigen::Vector3d gnss_xyz(a, b, c);
             iter->second.xyz = gnss_xyz;
-            eskf.updatelane(iter->second);
-            eskf.updateRPY(iter->second);
+            eskf.updatelane(iter->second, 1e-13);
+            //eskf.updateRPY(iter->second);
         }
         else if (iter->second.id == 3)
         {
-            //eskf.updateVehicle(iter->second);
+            eskf.updateVehicle(iter->second,1e-10);
         }
         count++;
 
@@ -141,14 +142,14 @@ int main(int argc, char** argv)
 			eskf.getPose(state);
 			GNSSEKFX.push_back(state.p(0));
 			GNSSEKFY.push_back(state.p(1));
-			//std::cout << state.p(0) << "," << state.p(1) << "," << state.p(2)
-			//      << "," << state.bg(0)
-			//      << "," << state.bg(1)
-			//      << "," << state.bg(2)
-			//      << "," << state.ba(0)
-			//      << "," << state.ba(1)
-			//      << "," << state.ba(2)
-			//      << std::endl;
+			std::cout << state.p(0) << "," << state.p(1) << "," << state.p(2)
+			      << "," << state.bg(0)
+			      << "," << state.bg(1)
+			      << "," << state.bg(2)
+			      << "," << state.ba(0)
+			      << "," << state.ba(1)
+			      << "," << state.ba(2)
+			      << std::endl;
 			timeESKF.push_back(state.time);
 			double heading = ToEulerAngles(state.q)[2];
 			heading = heading + 2.0 * EIGEN_PI;
@@ -192,7 +193,7 @@ int main(int argc, char** argv)
     plt::named_plot("GNSS", GNSSF9KX, GNSSF9KY, "r*");
     plt::named_plot("ESKF", GNSSEKFX, GNSSEKFY, "b*");
     plt::named_plot("lane", laneX, laneY, "k*");
-    plt::named_plot("E1", GNSSE1X, GNSSE1Y, "g*");
+   // plt::named_plot("E1", GNSSE1X, GNSSE1Y, "g*");
     plt::legend();
 
 
@@ -201,7 +202,7 @@ int main(int argc, char** argv)
     plt::named_plot("ESKF", timeESKF, yawESKF, "b*");
     plt::named_plot("GNSS", GNSSTime, GNSSYaw, "r*");
     plt::named_plot("lane", timeGNSSLane, laneYaw, "k*");
-    plt::named_plot("E1", timeGNSSE1, E1Yaw, "g*");
+   // plt::named_plot("E1", timeGNSSE1, E1Yaw, "g*");
     plt::legend();
 
     plt::show();

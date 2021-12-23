@@ -10,11 +10,12 @@ class eskf
 
 public:
 	bool Predict(Data imuData);
+	void updateXYZ(const Data XYZ,const double cov);
 	bool updateGPS(const Data gnss);
 	void updateq(const Data& q);
-	void updateRPY(const Data& RPY);
-	bool updatelane(const Data gnss);
-	bool updateVehicle(const Data vehicle);
+	void updateRPY(const Data& RPY, const double cov);
+	bool updatelane(const Data gnss, const double cov);
+	bool updateVehicle(const Data vehicle, const double cov);
 	bool InitPose(State state, Data data);
 	void getPose(State& state);
 	bool ComputeG_R_IFromImuData(Eigen::Matrix3d& G_R_I, std::vector<IMUData> imu_buffer_);
